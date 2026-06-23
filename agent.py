@@ -52,23 +52,25 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-def select_action(state, q_net, epsilon, n_actions):
-    """Epsilon-greedy: random explore, or best known action."""
-    if random.random() < epsilon:
-        return random.randint(0, n_actions - 1)
-    with torch.no_grad():
-        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-        q_values = q_net(state_tensor)
-        return torch.argmax(q_values).item()
+# def select_action(state, q_net, epsilon, n_actions):
+#     """Epsilon-greedy: random explore, or best known action."""
+#     if random.random() < epsilon:
+#         return random.randint(0, n_actions - 1)
+#     with torch.no_grad():
+#         state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+#         q_values = q_net(state_tensor)
+#         return torch.argmax(q_values).item()
 
 # never trade below 1% and over 50% cash
-def margin_to_size(margin, min_size=0.01, max_size=0.50, sharpness=1.0):
-    """Turns a Q-value margin into a trade-size fraction via a sigmoid squash."""
-    confidence = 1 / (1 + np.exp(-sharpness * margin))
+def margin_to_size(margin, min_size=0.01, max_size=0.90, scale=0.02):
+    """Maps a non-negative Q-value margin to a trade-size fraction.
+    margin=0 -> min_size (least confident). margin>=scale -> max_size (most confident).
+    Linear in between, capped so very large margins don't exceed max_size.
+    """
+    confidence = min(margin / scale, 1.0)
     return min_size + confidence * (max_size - min_size)
 
-
-def select_action_and_size(state, q_net, epsilon, n_actions, min_size=0.01, max_size=0.50):
+def select_action_and_size(state, q_net, epsilon, n_actions, min_size=0.01, max_size=0.90):
     """Epsilon-greedy action choice, plus a confidence-based trade size."""
     if random.random() < epsilon:
         action = random.randint(0, n_actions - 1)
@@ -87,7 +89,7 @@ def select_action_and_size(state, q_net, epsilon, n_actions, min_size=0.01, max_
     runner_up_q = max(q_values[i].item() for i in other_actions)
     margin = q_values[action].item() - runner_up_q
 
-    size_fraction = margin_to_size(margin)
+    size_fraction = margin_to_size(margin, min_size=min_size, max_size=max_size, scale=0.02)
     return action, size_fraction
 
 

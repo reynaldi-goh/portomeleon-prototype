@@ -3,7 +3,6 @@
 import gymnasium as gym
 import numpy as np
 
-
 class TradingEnv(gym.Env):
     def __init__(self, price_data, initial_cash=10000):
         super().__init__()
@@ -53,7 +52,7 @@ class TradingEnv(gym.Env):
         # apply action, but only if it actually changes anything
         if action == 1:  # buy
             cash_to_spend = self.cash * size_fraction
-            shares_to_buy = cash_to_spend // price
+            shares_to_buy = int(cash_to_spend // price)  # whole shares only
             if shares_to_buy > 0:
                 self.cash -= shares_to_buy * price
                 self.shares_held += shares_to_buy
@@ -61,13 +60,13 @@ class TradingEnv(gym.Env):
             else:
                 self.effective_action = 0  # no cash, counts as hold
         elif action == 2:  # sell
-            shares_to_sell = self.shares_held * size_fraction
+            shares_to_sell = int(self.shares_held * size_fraction)  # whole shares only
             if shares_to_sell > 0:
                 self.cash += shares_to_sell * price
                 self.shares_held -= shares_to_sell
                 self.effective_action = 2
             else:
-                self.effective_action = 0  # nothing to sell, counts as hold
+                self.effective_action = 0  # less than 1 share, counts as hold
         else:
             self.effective_action = 0  # explicit hold
 
