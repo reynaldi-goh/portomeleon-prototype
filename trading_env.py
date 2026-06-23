@@ -18,14 +18,15 @@ class TradingEnv(gym.Env):
         )
 
     def _get_obs(self):
-        # build the state vector for the current day
+        # build the state vector for the current day, normalized to comparable scales
         row = self.price_data.iloc[self.current_step]
+        price = row["Close"]
         return np.array([
-            row["Close"],
-            row["MA10"],
-            self.cash,
-            self.shares_held,
-            self.portfolio_value,
+            price / self.initial_price,
+            row["MA10"] / self.initial_price,
+            self.cash / self.initial_cash,
+            (self.shares_held * price) / self.initial_cash,
+            self.portfolio_value / self.initial_cash,
         ], dtype=np.float32)
 
     def _get_info(self):
@@ -43,14 +44,16 @@ class TradingEnv(gym.Env):
         self.shares_held = 0
         self.portfolio_value = self.initial_cash
         self.effective_action = 0
+        self.initial_price = self.price_data.iloc[0]["Close"]
         return self._get_obs(), self._get_info()
 
-    def step(self, action):
+    def step(self, action, size_fraction=1.0):
         price = self.price_data.iloc[self.current_step]["Close"]
 
         # apply action, but only if it actually changes anything
         if action == 1:  # buy
-            shares_to_buy = self.cash // price
+            cash_to_spend = self.cash * size_fraction
+            shares_to_buy = cash_to_spend // price
             if shares_to_buy > 0:
                 self.cash -= shares_to_buy * price
                 self.shares_held += shares_to_buy
@@ -58,9 +61,10 @@ class TradingEnv(gym.Env):
             else:
                 self.effective_action = 0  # no cash, counts as hold
         elif action == 2:  # sell
-            if self.shares_held > 0:
-                self.cash += self.shares_held * price
-                self.shares_held = 0
+            shares_to_sell = self.shares_held * size_fraction
+            if shares_to_sell > 0:
+                self.cash += shares_to_sell * price
+                self.shares_held -= shares_to_sell
                 self.effective_action = 2
             else:
                 self.effective_action = 0  # nothing to sell, counts as hold

@@ -61,6 +61,35 @@ def select_action(state, q_net, epsilon, n_actions):
         q_values = q_net(state_tensor)
         return torch.argmax(q_values).item()
 
+# never trade below 1% and over 50% cash
+def margin_to_size(margin, min_size=0.01, max_size=0.50, sharpness=1.0):
+    """Turns a Q-value margin into a trade-size fraction via a sigmoid squash."""
+    confidence = 1 / (1 + np.exp(-sharpness * margin))
+    return min_size + confidence * (max_size - min_size)
+
+
+def select_action_and_size(state, q_net, epsilon, n_actions, min_size=0.01, max_size=0.50):
+    """Epsilon-greedy action choice, plus a confidence-based trade size."""
+    if random.random() < epsilon:
+        action = random.randint(0, n_actions - 1)
+        size_fraction = random.uniform(min_size, max_size)
+        return action, size_fraction
+
+    with torch.no_grad():
+        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+        q_values = q_net(state_tensor).squeeze(0)
+        action = torch.argmax(q_values).item()
+
+    if action == 0:  # HOLD - no size needed
+        return action, 0.0
+
+    other_actions = [i for i in range(n_actions) if i != action]
+    runner_up_q = max(q_values[i].item() for i in other_actions)
+    margin = q_values[action].item() - runner_up_q
+
+    size_fraction = margin_to_size(margin)
+    return action, size_fraction
+
 
 def train_step(q_net, target_net, optimizer, loss_fn, buffer, batch_size=32, gamma=0.99):
     """One gradient update from a random batch of past experiences."""
