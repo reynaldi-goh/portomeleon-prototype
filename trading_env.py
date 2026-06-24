@@ -4,22 +4,27 @@ import gymnasium as gym
 import numpy as np
 
 class TradingEnv(gym.Env):
+    """Gymnassium trading environment"""
+    # create trading environment
     def __init__(self, price_data, initial_cash=10000):
         super().__init__()
+        # store price data from yfinance
         self.price_data = price_data
+        # initial cash of 10000 by default
         self.initial_cash = initial_cash
-
         # 3 actions: hold, buy, sell
         self.action_space = gym.spaces.Discrete(3)
-        # 5 numbers: Close, MA10, cash, shares_held, portfolio_value
+        # 5 numbers: close, MA10, cash, shares_held, portfolio_value
         self.observation_space = gym.spaces.Box(
             low=-np.inf, high=np.inf, shape=(5,), dtype=np.float32
         )
 
+    # build the current state seen by the agent
     def _get_obs(self):
         # build the state vector for the current day, normalized to comparable scales
         row = self.price_data.iloc[self.current_step]
         price = row["Close"]
+        # normalise values to similar scales
         return np.array([
             price / self.initial_price,
             row["MA10"] / self.initial_price,

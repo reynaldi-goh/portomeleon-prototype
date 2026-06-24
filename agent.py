@@ -2,7 +2,6 @@
 
 import random
 from collections import deque
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -12,6 +11,8 @@ import torch.optim as optim
 class QNetwork(nn.Module):
     """Maps a state to a Q-value for each action."""
 
+    # create the neural network architecture, take observation, such as close, MA10, 
+    # output q values of actions
     def __init__(self, obs_size, n_actions):
         super().__init__()
         self.net = nn.Sequential(
@@ -22,6 +23,7 @@ class QNetwork(nn.Module):
             nn.Linear(64, n_actions),
         )
 
+    # calculate Q values from a state
     def forward(self, x):
         return self.net(x)
 
@@ -29,13 +31,16 @@ class QNetwork(nn.Module):
 class ReplayBuffer:
     """Stores past experiences and samples random batches for training."""
 
+    # create memory for storing experiences, default size = 10000 elements
     def __init__(self, capacity=10000):
         self.buffer = deque(maxlen=capacity)  # auto-drops oldest when full
 
+    # save one experience to replay buffer
     def push(self, state, action, reward, next_state, done):
         # save one experience tuple
         self.buffer.append((state, action, reward, next_state, done))
 
+    # get a random batch of experiences
     def sample(self, batch_size):
         # random batch, breaks day-to-day correlation
         batch = random.sample(self.buffer, batch_size)
@@ -48,51 +53,49 @@ class ReplayBuffer:
             torch.tensor(np.array(dones), dtype=torch.float32),
         )
 
+    # return the number of stored experiences
     def __len__(self):
         return len(self.buffer)
 
-
-# def select_action(state, q_net, epsilon, n_actions):
-#     """Epsilon-greedy: random explore, or best known action."""
-#     if random.random() < epsilon:
-#         return random.randint(0, n_actions - 1)
-#     with torch.no_grad():
-#         state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-#         q_values = q_net(state_tensor)
-#         return torch.argmax(q_values).item()
-
-# never trade below 1% and over 50% cash
+# convert Q value to confidence in trade size
+# never trade below 1% or over 90% cash
 def margin_to_size(margin, min_size=0.01, max_size=0.90, scale=0.02):
-    """Maps a non-negative Q-value margin to a trade-size fraction.
-    margin=0 -> min_size (least confident). margin>=scale -> max_size (most confident).
-    Linear in between, capped so very large margins don't exceed max_size.
-    """
+    """Maps a non-negative Q-value margin to a trade-size fraction."""
     confidence = min(margin / scale, 1.0)
     return min_size + confidence * (max_size - min_size)
 
+# choose an action and trade size using epsilon greedy strategy
 def select_action_and_size(state, q_net, epsilon, n_actions, min_size=0.01, max_size=0.90):
     """Epsilon-greedy action choice, plus a confidence-based trade size."""
+    # when the epsilon is still big
     if random.random() < epsilon:
-        action = random.randint(0, n_actions - 1)
-        size_fraction = random.uniform(min_size, max_size)
+        action = random.randint(0, n_actions - 1)  # pick a random action
+        size_fraction = random.uniform(min_size, max_size)  # pick a random size
         return action, size_fraction
-
+    # disable gradient tracking during inference
     with torch.no_grad():
+        # convert state in tensor format
         state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+        # predict q values for all actions
         q_values = q_net(state_tensor).squeeze(0)
+        # choose action with the highest q value
         action = torch.argmax(q_values).item()
-
-    if action == 0:  # HOLD - no size needed
+    # hold actions 
+    if action == 0:  
         return action, 0.0
-
+    # find second best action
     other_actions = [i for i in range(n_actions) if i != action]
+    # get runner up q value, if it is buy, then the runner up is sell and vice versa
     runner_up_q = max(q_values[i].item() for i in other_actions)
+    # take difference of q value
     margin = q_values[action].item() - runner_up_q
-
+    # convert difference to confidence level
+    # the bigger the difference, the more confidence bot has over the best action
     size_fraction = margin_to_size(margin, min_size=min_size, max_size=max_size, scale=0.02)
     return action, size_fraction
 
 
+# train the q network using a batch of past experiences
 def train_step(q_net, target_net, optimizer, loss_fn, buffer, batch_size=32, gamma=0.99):
     """One gradient update from a random batch of past experiences."""
     if len(buffer) < batch_size:
@@ -100,7 +103,7 @@ def train_step(q_net, target_net, optimizer, loss_fn, buffer, batch_size=32, gam
 
     states, actions, rewards, next_states, dones = buffer.sample(batch_size)
 
-    # Q-value the network predicted for the action actually taken
+    # Q value the network predicted for the action actually taken
     q_values = q_net(states)
     predicted_q = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
 
@@ -112,28 +115,35 @@ def train_step(q_net, target_net, optimizer, loss_fn, buffer, batch_size=32, gam
     # Bellman target: reward now plus discounted future value
     target_q = rewards + gamma * max_next_q * (1 - dones)
 
+    # calculate loss and update network weights
     loss = loss_fn(predicted_q, target_q)
-
+    # clear old gradients
     optimizer.zero_grad()
+    # compute gradients
     loss.backward()
+    # update network weights
     optimizer.step()
 
     return loss.item()
 
-
+# copy weights from q network to the target network
 def update_target_network(q_net, target_net):
-    # copy main network's weights into the target network
     target_net.load_state_dict(q_net.state_dict())
 
-
+# create all components needed for the dqn agent
 def build_agent(obs_size, n_actions, lr=1e-3):
     """Creates q_net, target_net, optimizer, and loss function together."""
+    # create current network
     q_net = QNetwork(obs_size, n_actions)
+    # create frozen, target network
     target_net = QNetwork(obs_size, n_actions)
+    # start both networks with identical weights
     target_net.load_state_dict(q_net.state_dict())
-    target_net.eval()  # only ever updated by copying, never by backprop
-
+    # only ever updated by copying, never by backprop
+    target_net.eval()  
+    # adam optimiser for gradient updates
     optimizer = optim.Adam(q_net.parameters(), lr=lr)
-    loss_fn = nn.SmoothL1Loss()  # Huber loss
+    # huber loss
+    loss_fn = nn.SmoothL1Loss() 
 
     return q_net, target_net, optimizer, loss_fn
