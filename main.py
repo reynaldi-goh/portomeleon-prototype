@@ -1,5 +1,7 @@
 """Main: load data, train the agent, then step through it day by day."""
-
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
 import yfinance as yf
 from trading_env import TradingEnv
 from agent import build_agent, select_action_and_size, train_step, update_target_network, ReplayBuffer
@@ -27,6 +29,7 @@ def train(env, q_net, target_net, optimizer, loss_fn, n_actions,
     buffer = ReplayBuffer(capacity=10000)
     # track the total of steps in the environment
     step_count = 0
+    loss_history = []
 
     # run multiple training episodes
     for episode in range(n_episodes):
@@ -46,8 +49,10 @@ def train(env, q_net, target_net, optimizer, loss_fn, n_actions,
             done = terminated or truncated
             # store experience in replay buffer
             buffer.push(obs, action, reward, next_obs, done)
-            # train the network from replay memory
-            train_step(q_net, target_net, optimizer, loss_fn, buffer, batch_size)
+            # train the network from replay memory and store it in loss
+            loss = train_step(q_net, target_net, optimizer, loss_fn, buffer, batch_size)
+            if loss is not None:               
+                loss_history.append(loss)  # store in loss list
             # add step
             step_count += 1
             # update target network periodically
@@ -61,6 +66,8 @@ def train(env, q_net, target_net, optimizer, loss_fn, n_actions,
         epsilon = max(epsilon_min, epsilon * epsilon_decay)  
         print(f"Episode {episode+1}/{n_episodes} | reward={total_reward:.4f} | "
               f"epsilon={epsilon:.3f} | portfolio={info['portfolio_value']:.2f}")
+        
+    return loss_history
 
 # replay the trained agent one day at a time
 def run_stepper(env, q_net, n_actions):
@@ -106,6 +113,27 @@ if __name__ == "__main__":
     # create dqn agent
     q_net, target_net, optimizer, loss_fn = build_agent(obs_size, n_actions)
     # train the agent
-    train(env, q_net, target_net, optimizer, loss_fn, n_actions)
+    loss_history = train(env, q_net, target_net, optimizer, loss_fn, n_actions)
     # test the agent
     run_stepper(env, q_net, n_actions)
+
+    # plot the loss
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    steps = np.arange(len(loss_history))
+    ax.plot(steps, loss_history, color="#B8C4D9", linewidth=0.5, alpha=0.7, label="Per-update loss")
+    rolling = pd.Series(loss_history).rolling(100).mean()
+    ax.plot(steps, rolling, color="#2C5F8A", linewidth=2, label="100-step rolling mean")
+    ax.set_yscale("log")
+    ax.set_xlabel("Training step")
+    ax.set_ylabel("Huber loss (log scale)")
+    ax.set_title("DQN training loss over time")
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    fig.savefig("loss_curve.png", dpi=150)
+
+    quarters = np.array_split(np.array(loss_history), 4)
+    print("\nMean loss by training quarter:")
+    for i, q in enumerate(quarters, 1):
+        print(f"  Q{i}: {q.mean():.6f}")
+
+
