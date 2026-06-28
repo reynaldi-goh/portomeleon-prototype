@@ -1,1 +1,3 @@
-portomeleon prototype
+Portomeleon Feature Prototype
+
+A Deep Q-Network (DQN) reinforcement learning agent that learns a buy, hold, or sell trading policy from historical stock price data. Built with PyTorch and a custom Gymnasium environment, the agent is trained on AAPL price history using experience replay and a target network for stable learning. The observation space combines closing price and a 10-day moving average, normalised to a common scale, and the agent sizes its trades based on the confidence margin between Q-values. This prototype forms the core DQN layer of a larger project exploring explainable AI-driven portfolio management for retail investors.
